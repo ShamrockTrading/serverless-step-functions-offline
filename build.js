@@ -89,7 +89,7 @@ module.exports = {
             return;
         }// end of states
         this.executionLog(`~~~~~~~~~~~~~~~~~~~~~~~~~~~ ${this.currentStateName} started ~~~~~~~~~~~~~~~~~~~~~~~~~~~`);
-
+        this.currentEvent = event;
         const contextObject = this.subContextObject || this.contextObject;
         return f(event, contextObject, contextObject.done);
     },
@@ -135,13 +135,17 @@ module.exports = {
                         this.subContextObject = null;
                         this.subStates = null;
 
-                        if (currentState.ResultPath) {
-                            _.set(event, currentState.ResultPath.replace(/\$\./, ''), this.mapResults);
+                        let result = [...this.mapResults];
+                        if (currentState.hasOwnProperty('ResultPath')) {
+                            result = event;
+                            if (currentState.ResultPath !== null) {
+                                _.set(result, currentState.ResultPath.replace(/\$\./, ''), this.mapResults);
+                            }
                         }
 
                         delete this.mapResults;
 
-                        return this.process(this.states[currentState.Next], currentState.Next, event);
+                        return this.process(this.states[currentState.Next], currentState.Next, result);
                     });
                 },
             };
@@ -227,7 +231,7 @@ module.exports = {
                 f: (event) => {
                     return (arg1, arg2, cb) => {
                         this.cliLog('!!! Pass State !!!');
-                        const eventResult = this._passStateFields(currentState, event);
+                        const eventResult = currentState.Result || event;
                         cb(null, eventResult);
 
                     };
@@ -248,20 +252,6 @@ module.exports = {
             return Promise.resolve('Fail');
         }
         return;
-    },
-
-    _passStateFields(currentState, event) {
-        if (!currentState.ResultPath) {
-            return currentState.Result || event;
-        } else {
-            const variableName = currentState.ResultPath.split('$.')[1];
-            if (!currentState.Result) {
-                event[variableName] = event;
-                return event;
-            }
-            event[variableName] = currentState.Result;
-            return event;
-        }
     },
 
     _runChoice(data, result) {
@@ -340,16 +330,27 @@ module.exports = {
             }
             this.executionLog(`~~~~~~~~~~~~~~~~~~~~~~~~~~~ ${this.currentStateName} finished ~~~~~~~~~~~~~~~~~~~~~~~~~~~`);
             let state = states;
+            let configuredResult = result;
+            const supportsResultPath = ['Pass', 'Task', 'Parallel'];
+
+            if (this.currentState.hasOwnProperty('ResultPath') && supportsResultPath.includes(this.currentState.Type)) {
+                const resultPath = this.currentState.ResultPath;
+                configuredResult = this.currentEvent;
+                if (resultPath !== null) {
+                    _.set(configuredResult, resultPath.replace(/\$\./, ''), result);
+                }
+            }
+
             if (this.parallelBranch && this.parallelBranch.States) {
                 state = this.parallelBranch.States;
-                if (!this.currentState.Next) this.eventParallelResult.push(result); //it means the end of execution of branch
+                if (!this.currentState.Next) this.eventParallelResult.push(configuredResult); //it means the end of execution of branch
             }
 
             if (this.mapResults && !this.currentState.Next) {
-                this.mapResults.push(result);
+                this.mapResults.push(configuredResult);
             }
 
-            this.process(state[this.currentState.Next], this.currentState.Next, result);
+            this.process(state[this.currentState.Next], this.currentState.Next, configuredResult);
             // return resolve();
             // });
         };
