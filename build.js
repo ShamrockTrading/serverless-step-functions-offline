@@ -6,16 +6,7 @@ const Promise = require('bluebird');
 const enumList = require('./enum');
 
 module.exports = {
-    // findFunctionsPathAndHandler() {
-    //     for (const functionName in this.variables) {
-    //         const functionHandler = this.variables[functionName];
-    //         const {handler, filePath} = this._findFunctionPathAndHandler(functionHandler);
-    //
-    //         this.variables[functionName] = {handler, filePath};
-    //     }
-    //     console.log('this.va', this.variables)
-    // },
-    //
+
     _findFunctionPathAndHandler(functionHandler) {
         const dir = path.dirname(functionHandler);
         const handler = path.basename(functionHandler);
@@ -88,7 +79,7 @@ module.exports = {
         if (!f) {
             return;
         }// end of states
-        this.executionLog(`~~~~~~~~~~~~~~~~~~~~~~~~~~~ ${this.currentStateName} started ~~~~~~~~~~~~~~~~~~~~~~~~~~~`);
+        this.cliLog(`~~~~~~~~~~~~~~~~~~~~~~~~~~~ ${this.currentStateName} started ~~~~~~~~~~~~~~~~~~~~~~~~~~~`);
         this.currentEvent = event;
         const contextObject = this.subContextObject || this.contextObject;
         return f(event, contextObject, contextObject.done);
@@ -124,8 +115,13 @@ module.exports = {
                                 return acc;
                             }, {});
 
-                            return this.buildSubStepWorkFlow(currentState.Iterator, params)
-                                .then(() => processNextItem());
+                            const promiseCallback = (resolve) => {
+                                this.mapResolve = resolve;
+                            };
+
+                            this.mapPromise = new Promise(promiseCallback);
+                            return this.buildSubStepWorkFlow(currentState.Iterator, params).then(() =>
+                                this.mapPromise.then(() => processNextItem()));
                         }
 
                         return Promise.resolve();
@@ -134,6 +130,8 @@ module.exports = {
                     processNextItem().then(() => {
                         this.subContextObject = null;
                         this.subStates = null;
+                        this.mapPromise = null;
+                        this.mapResolve = null;
 
                         let result = [...this.mapResults];
                         if (currentState.hasOwnProperty('ResultPath')) {
@@ -143,8 +141,7 @@ module.exports = {
                             }
                         }
 
-                        delete this.mapResults;
-
+                        this.mapResults = null;
                         return this.process(this.states[currentState.Next], currentState.Next, result);
                     });
                 },
@@ -324,11 +321,10 @@ module.exports = {
 
     createContextObject(states) {
         const cb = (err, result) => {
-            // return new Promise((resolve, reject) => {
             if (err) {
                 throw `Error in function "${this.currentStateName}": ${JSON.stringify(err)}`;
             }
-            this.executionLog(`~~~~~~~~~~~~~~~~~~~~~~~~~~~ ${this.currentStateName} finished ~~~~~~~~~~~~~~~~~~~~~~~~~~~`);
+            this.cliLog(`~~~~~~~~~~~~~~~~~~~~~~~~~~~ ${this.currentStateName} finished ~~~~~~~~~~~~~~~~~~~~~~~~~~~`);
             let state = states;
             let configuredResult = result;
             const supportsResultPath = ['Pass', 'Task', 'Parallel'];
@@ -348,11 +344,10 @@ module.exports = {
 
             if (this.mapResults && !this.currentState.Next) {
                 this.mapResults.push(configuredResult);
+                this.mapResolve();
             }
 
             this.process(state[this.currentState.Next], this.currentState.Next, configuredResult);
-            // return resolve();
-            // });
         };
 
         return {
@@ -363,8 +358,4 @@ module.exports = {
         };
 
     },
-
-    executionLog(log) {
-        if (this.detailedLog) this.cliLog(log);
-    }
 };
